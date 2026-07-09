@@ -20,8 +20,9 @@ percentage against. It reads `ctx --` until the first reply lands, and again rig
 `/compact`, because until then there is genuinely nothing to report. On a Claude Code too
 old to send the numbers, the segment is left out rather than showing a permanent `--`.
 
-Claude Code's own footer carries a bare `X% context used`; this puts the token count and the
-window size beside it, and colours them.
+Claude Code has a context readout of its own, but you will rarely have seen it: the footer
+renders nothing until you are within 20k tokens of auto-compact, and only then warns. This
+segment is there for the whole session, and counts tokens rather than only percent.
 
 ## Install
 
