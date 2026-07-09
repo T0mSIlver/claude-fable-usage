@@ -9,11 +9,11 @@ A Claude Code status line showing your **5-hour**, **7-day**, and **Fable weekly
 
 Percentages are colour-coded: green under 50%, yellow from 50%, red from 80%.
 
-## Does it replace the default status line?
+## Does it remove any default status line items?
 
-Almost nothing. The custom line is appended as an extra row *below* the existing footer,
-not in place of it. Comparing captured frames with and without it configured, at the same
-terminal width, the only casualty is the `? for shortcuts` hint:
+One, and it's a hint rather than information: `? for shortcuts`. The custom line is
+appended as an extra row *below* the existing footer, not in place of it. Captured frames
+with and without it configured, same terminal width:
 
 ```
 without:   ⏸ manual mode on · ? for shortcuts    ● high · /effort
@@ -24,12 +24,13 @@ with:      ⏸ manual mode on                      ● high · /effort
            5h 21% · 7d 10% · Fable 15%
 ```
 
-The permission mode, effort level, and remote-control indicator all survive. Model name,
-context window, and cost were never in the footer to begin with — they live in the welcome
-box and `/status`.
+That is the whole of it, and it's deliberate rather than incidental — the footer component
+takes a `suppressHint` prop which is set when a custom `statusLine` is configured, and that
+prop gates only the hint. Permission mode, effort level, the remote-control indicator, and
+the `X% context used` / `Context low (…)` line are all rendered independently and survive.
 
-Vim mode is unaffected too: Claude Code keeps drawing its own `-- INSERT --` indicator. If
-you'd rather your status line owned that, set `hideVimModeIndicator: true` *inside* the
+Vim mode survives too: Claude Code keeps drawing its own `-- INSERT --` indicator. If you'd
+rather your status line owned that, set `hideVimModeIndicator: true` *inside* the
 `statusLine` object.
 
 ## Install
@@ -70,14 +71,17 @@ So the Fable weekly limit is read from `GET /api/oauth/usage`, the same endpoint
   "scope": { "model": { "display_name": "Fable" } } }
 ```
 
-That response is cached in `~/.claude/fable-usage-cache.json` for 60s and refreshed by a
-detached child process, so rendering never blocks on the network (~30ms). Concurrent
-sessions coordinate through an `O_EXCL` lock, so eight simultaneous status lines
-produce exactly one HTTP request.
+That response is cached in `~/.claude/fable-usage-cache.json` and refreshed by a detached
+child process, so rendering never blocks on the network (~30ms). Concurrent sessions
+coordinate through an `O_EXCL` lock, so eight simultaneous status lines produce exactly
+one HTTP request.
 
-The endpoint rate-limits. When a fetch fails, the last known numbers are kept and the
-refresh parks for 5 minutes (or whatever `Retry-After` asks for, clamped to 1–15 min)
-rather than letting every render retry. A failed fetch never blanks the display.
+The endpoint rate-limits hard, and answers a 429 with `retry-after: 0`, which is no
+guidance at all. So: the cache lives for 5 minutes (a weekly window doesn't move faster
+than that — at most 12 requests/hour per machine), and a failed fetch keeps the last known
+numbers while parking the refresh for 5 minutes, or for a *positive* `Retry-After` clamped
+to 1–15 minutes. A failed fetch never blanks the display; the 5h/7d segments don't even
+notice, since they come from stdin.
 
 The 5h and 7d numbers still come straight from stdin — no network, always current. The
 cache is only a fallback for those, used before the first API response of a session.
