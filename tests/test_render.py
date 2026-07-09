@@ -216,6 +216,63 @@ def test_window_percent_ignores_a_wrongly_typed_cache_value(sl):
     assert sl.window_percent(None, {"percent": "lots"}) == (None, None)
 
 
+def test_cutoff_colour_is_inverted_against_colour_for(sl):
+    """A small number of seconds left is the alarming one."""
+    assert sl.cutoff_colour(86400 * 5) == sl.GREEN
+    assert sl.cutoff_colour(86400 * 3) == sl.GREEN
+    assert sl.cutoff_colour(86400 * 3 - 1) == sl.YELLOW
+    assert sl.cutoff_colour(86400) == sl.YELLOW
+    assert sl.cutoff_colour(86400 - 1) == sl.RED
+    assert sl.cutoff_colour(0) == sl.RED
+
+
+def test_cutoff_segment_counts_down(sl):
+    # A few seconds of slack: the remainder is truncated, not rounded.
+    out = sl.cutoff_segment(time.time() + 86400 * 4 + 3600 * 8 + 30)
+    assert "sub ends" in out
+    assert "4d 8h" in out
+    assert sl.GREEN in out
+
+
+def test_cutoff_segment_reddens_on_the_last_day(sl):
+    assert sl.YELLOW in sl.cutoff_segment(time.time() + 86400 * 2)
+    assert sl.RED in sl.cutoff_segment(time.time() + 3600 * 5)
+
+
+def test_cutoff_segment_disappears_once_passed(sl):
+    """A countdown frozen at zero would be worse than no segment at all."""
+    assert sl.cutoff_segment(time.time() - 1) is None
+    assert sl.cutoff_segment(time.time() - 86400 * 400) is None
+
+
+def test_cutoff_segment_survives_a_junk_override(sl):
+    assert sl.cutoff_segment("not a date") is None
+    assert sl.cutoff_segment("") is None
+
+
+def test_cutoff_segment_reads_the_module_constant(sl):
+    # A minute of slack: the remainder is truncated, not rounded.
+    sl.FABLE_CUTOFF = time.time() + 86400 * 2 + 60
+    assert "2d 0h" in sl.cutoff_segment()
+    sl.FABLE_CUTOFF = ""
+    assert sl.cutoff_segment() is None
+
+
+def test_parse_instant_edge_cases(sl):
+    assert sl.parse_instant(None) is None
+    assert sl.parse_instant("not a date") is None
+    # A naive stamp is read as UTC rather than as local time.
+    assert sl.parse_instant("2026-07-13T00:00:00").tzinfo is not None
+
+
+def test_humanise_delta_units(sl):
+    assert sl.humanise_delta(0) == "now"
+    assert sl.humanise_delta(-5) == "now"
+    assert sl.humanise_delta(60 * 31) == "31m"
+    assert sl.humanise_delta(3600 * 4 + 60 * 12) == "4h 12m"
+    assert sl.humanise_delta(86400 * 6 + 3600 * 9) == "6d 9h"
+
+
 def test_window_percent_prefers_stdin_over_cache(sl):
     stdin = {"used_percentage": 22, "resets_at": "a"}
     cache = {"percent": 99, "resets_at": "b"}

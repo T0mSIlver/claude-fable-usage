@@ -7,8 +7,8 @@ A Claude Code status line for your **context window** and your **5-hour**, **7-d
 on Fable.
 
 ```
-ctx 24.5k/200k 12% · 5h 17% · 7d 9% · Fable 15%                  ← on Opus/Sonnet
-ctx 132k/200k 66% · 5h 17% · 7d 9% · FABLE 15% ▰▱▱▱▱▱▱▱ · 6d 9h  ← on Fable
+ctx 24.5k/200k 12% · 5h 17% · 7d 9% · Fable 15% · sub ends 3d 7h                  ← on Opus/Sonnet
+ctx 132k/200k 66% · 5h 17% · 7d 9% · FABLE 15% ▰▱▱▱▱▱▱▱ · 6d 9h · sub ends 3d 7h  ← on Fable
 ```
 
 Green under 50%, yellow from 50%, red from 80%.
@@ -23,6 +23,34 @@ old to send the numbers, the segment is left out rather than showing a permanent
 Claude Code has a context readout of its own, but you will rarely have seen it: the footer
 renders nothing until you are within 20k tokens of auto-compact, and only then warns. This
 segment is there for the whole session, and counts tokens rather than only percent.
+
+## The `sub ends` countdown
+
+Fable's *included* access on Pro, Max, Team and select Enterprise plans ends on **July 12,
+2026** — extended from the original July 7 cutoff after the announcement drew complaints.
+After it, Fable is billed as metered usage credits at API rates rather than counting against
+the subscription's weekly limits.
+
+So `sub ends` counts down to a **billing change, not a retirement**. `claude-fable-5` sits on
+no published [deprecation schedule](https://platform.claude.com/docs/en/about-claude/model-deprecations),
+and Anthropic calls the change temporary and capacity-driven, saying it aims to restore Fable
+to subscriptions once it has the servers. Read the countdown as *"days until the `Fable`
+segment above stops meaning anything"*, because a credit balance is not a weekly window and
+this status line cannot show one.
+
+Anthropic published a date but never an hour or a timezone, so the countdown runs to the end
+of July 12 in UTC. Point it somewhere else — or drop the segment — with an ISO-8601 stamp:
+
+```sh
+export CLAUDE_FABLE_CUTOFF=2026-07-12T17:00:00-07:00   # a precise time, if one surfaces
+export CLAUDE_FABLE_CUTOFF=                            # empty: no countdown
+```
+
+Green until three days out, yellow from three days, red inside the last twenty-four hours —
+inverted against the usage segments, where it is the *large* number that alarms. The segment
+removes itself once the deadline passes, rather than sitting at a frozen zero, and it is
+gated behind the Fable segment: a plan that never had Fable included has nothing to lose on
+the date, and sees no countdown.
 
 ## Install
 
@@ -126,7 +154,8 @@ back to `security find-generic-password`, reproducing Claude Code's own service 
 (including the `-<sha256(dir)[:8]>` suffix under a custom `CLAUDE_CONFIG_DIR`).
 
 With no token the Fable segment shows `--` and 5h/7d keep working, since those never need
-the network. If your plan has no Fable weekly limit, the segment is omitted entirely.
+the network. If your plan has no Fable weekly limit, the segment is omitted entirely — and
+with it the `sub ends` countdown.
 
 ## Development
 

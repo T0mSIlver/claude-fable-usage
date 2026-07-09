@@ -40,6 +40,20 @@ HTTP_TIMEOUT = 5
 BACKOFF = 300  # after a failed fetch, wait this long before trying again
 MIN_BACKOFF, MAX_BACKOFF = 60, 900  # bounds on a server-supplied Retry-After
 
+# Fable's *included* access on paid plans ends on July 12, 2026 — extended from
+# the original July 7 cutoff after the announcement drew complaints. After it,
+# Fable is billed as metered usage credits rather than counting against the
+# subscription's weekly limits. Anthropic calls the change temporary and capacity
+# driven, so this is a countdown to a billing change, not to the model's
+# retirement: `claude-fable-5` is on no published deprecation schedule.
+#
+# Anthropic never published an hour or a timezone, only the date, so we count
+# down to the end of that day in UTC. Override with CLAUDE_FABLE_CUTOFF (an
+# ISO-8601 stamp) if a precise time surfaces, or set it empty to drop the
+# segment.
+FABLE_CUTOFF = os.environ.get("CLAUDE_FABLE_CUTOFF", "2026-07-13T00:00:00Z")
+CUTOFF_RED, CUTOFF_YELLOW = 86400, 3 * 86400  # seconds left before it gets loud
+
 RESET, BOLD, DIM = "\x1b[0m", "\x1b[1m", "\x1b[2m"
 GREEN, YELLOW, RED = "\x1b[32m", "\x1b[33m", "\x1b[31m"
 SEP = f"{DIM} · {RESET}"
@@ -276,23 +290,23 @@ def colour_for(percent: float) -> str:
     return GREEN
 
 
-def humanise_reset(resets_at) -> str:
-    """'4h 12m' until the window resets, or '' if it can't be worked out."""
-    if resets_at is None:
-        return ""
+def parse_instant(value):
+    """Epoch seconds or an ISO-8601 stamp to an aware datetime, or None."""
+    if value is None:
+        return None
     try:
-        if isinstance(resets_at, (int, float)):
-            target = datetime.fromtimestamp(resets_at, tz=timezone.utc)
-        else:
-            # Python 3.9's fromisoformat, which is what stock macOS ships, cannot
-            # parse a trailing 'Z'.
-            target = datetime.fromisoformat(str(resets_at).replace("Z", "+00:00"))
-            if target.tzinfo is None:
-                target = target.replace(tzinfo=timezone.utc)
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        # Python 3.9's fromisoformat, which is what stock macOS ships, cannot
+        # parse a trailing 'Z'.
+        target = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (ValueError, OSError, OverflowError):
-        return ""
+        return None
+    return target if target.tzinfo else target.replace(tzinfo=timezone.utc)
 
-    seconds = (target - datetime.now(timezone.utc)).total_seconds()
+
+def humanise_delta(seconds: float) -> str:
+    """'6d 9h', '4h 12m', '31m' — the remainder is truncated, not rounded."""
     if seconds <= 0:
         return "now"
     days, seconds = divmod(int(seconds), 86400)
@@ -303,6 +317,20 @@ def humanise_reset(resets_at) -> str:
     if hours:
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
+
+
+def seconds_until(value):
+    """Seconds from now until an instant, or None if it can't be worked out."""
+    target = parse_instant(value)
+    if target is None:
+        return None
+    return (target - datetime.now(timezone.utc)).total_seconds()
+
+
+def humanise_reset(resets_at) -> str:
+    """'4h 12m' until the window resets, or '' if it can't be worked out."""
+    seconds = seconds_until(resets_at)
+    return "" if seconds is None else humanise_delta(seconds)
 
 
 def number(value):
@@ -434,6 +462,29 @@ def fable_segment(window: dict | None, label: str, active: bool) -> str:
     )
 
 
+def cutoff_colour(seconds: float) -> str:
+    """Inverted against colour_for: here a *small* number is the alarming one."""
+    if seconds < CUTOFF_RED:
+        return RED
+    if seconds < CUTOFF_YELLOW:
+        return YELLOW
+    return GREEN
+
+
+def cutoff_segment(cutoff=None):
+    """'sub ends 2d 8h' — what is left of Fable's included subscription access.
+
+    None once the deadline passes, or when it can't be parsed. A countdown frozen
+    at zero would be worse than no segment, and what replaces the subscription —
+    metered credits — is not a window this status line can measure.
+    """
+    seconds = seconds_until(FABLE_CUTOFF if cutoff is None else cutoff)
+    if seconds is None or seconds <= 0:
+        return None
+    colour = cutoff_colour(seconds)
+    return f"{DIM}sub ends{RESET} {colour}{humanise_delta(seconds)}{RESET}"
+
+
 def window_percent(stdin_window, cached_window) -> tuple:
     """Prefer the value Claude Code handed us; fall back to the cache.
 
@@ -485,6 +536,11 @@ def main() -> None:
     parts += [segment("5h", five_hour), segment("7d", seven_day)]
     if fable_window is not None or on_fable:
         parts.append(fable_segment(fable_window, fable_label, on_fable))
+        # Gated with the Fable segment: a plan that never had Fable included has
+        # nothing to lose on the cutoff date, so the countdown is only noise.
+        countdown = cutoff_segment()
+        if countdown:
+            parts.append(countdown)
 
     sys.stdout.write(SEP.join(parts))
 
