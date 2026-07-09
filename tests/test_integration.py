@@ -89,12 +89,43 @@ def test_context_segment_is_absent_on_older_claude_code(tmp_path):
     {},
     {"context_window_size": 0, "used_percentage": 5},
     {"context_window_size": 200_000, "used_percentage": None, "current_usage": None},
+    # Wrongly typed numbers. Each of these used to raise a TypeError and take the
+    # status line down with it, leaving a broken footer.
+    {"total_input_tokens": "lots", "context_window_size": 200_000, "used_percentage": 12},
+    {"total_input_tokens": 1_000, "context_window_size": "big", "used_percentage": 12},
+    {"total_input_tokens": 1_000, "context_window_size": 200_000, "used_percentage": "half"},
+    {"total_input_tokens": 1_000, "context_window_size": -200_000, "used_percentage": 12},
+    {"context_window_size": 200_000, "current_usage": {"input_tokens": "x"}},
+    {"context_window_size": [], "used_percentage": {}},
 ])
 def test_render_survives_any_context_window(tmp_path, context_window):
     result = render(json.dumps({"context_window": context_window}), tmp_path)
     assert result.returncode == 0, result.stderr
     assert "ctx" in result.stdout
     assert "5h" in result.stdout
+
+
+@pytest.mark.parametrize("rate_limits", [
+    {"five_hour": "unexpectedly a string"},
+    {"five_hour": {"used_percentage": "half"}},
+    {"five_hour": {"used_percentage": [1]}},
+    {"seven_day": {"used_percentage": True}},
+])
+def test_render_survives_wrongly_typed_rate_limits(tmp_path, rate_limits):
+    """The same defect lived one level deeper in the 5h/7d path."""
+    result = render(json.dumps({"rate_limits": rate_limits}), tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "5h" in result.stdout
+
+
+def test_render_survives_a_corrupt_cached_fable_percent(tmp_path):
+    (tmp_path / "fable-usage-cache.json").write_text(json.dumps({
+        "fetched_at": time.time(),
+        "model_scoped": {"Fable": {"percent": "lots"}},
+    }))
+    result = render(FABLE_STDIN, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "--" in result.stdout
 
 
 def test_render_works_with_no_token_and_no_cache(tmp_path):
