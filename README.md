@@ -46,7 +46,7 @@ export CLAUDE_FABLE_CUTOFF=2026-07-12T17:00:00-07:00   # a precise time, if one 
 export CLAUDE_FABLE_CUTOFF=                            # empty: no countdown
 ```
 
-Green until three days out, yellow from three days, red inside the last twenty-four hours —
+Green until three days out, yellow inside three days, red inside the last twenty-four hours —
 inverted against the usage segments, where it is the *large* number that alarms. The segment
 removes itself once the deadline passes, rather than sitting at a frozen zero, and it is
 gated behind the Fable segment: a plan that never had Fable included has nothing to lose on
