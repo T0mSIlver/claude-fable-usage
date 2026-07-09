@@ -1,5 +1,7 @@
 # claude-fable-usage
 
+[![CI](https://github.com/T0mSIlver/claude-fable-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/T0mSIlver/claude-fable-usage/actions/workflows/ci.yml)
+
 A Claude Code status line for your **5-hour**, **7-day**, and **Fable weekly** usage limits.
 The Fable segment stays quiet until the session is actually on Fable.
 
@@ -113,3 +115,20 @@ back to `security find-generic-password`, reproducing Claude Code's own service 
 
 With no token the Fable segment shows `--` and 5h/7d keep working, since those never need
 the network. If your plan has no Fable weekly limit, the segment is omitted entirely.
+
+## Development
+
+```sh
+python -m pytest -q   # pytest is the only dependency, and only for the tests
+ruff check .
+```
+
+Beyond the formatting and backoff arithmetic, the suite pins the two invariants most likely
+to break silently: eight concurrent renders make exactly one HTTP request, and the script
+never exits non-zero no matter what arrives on stdin — a crashing status line leaves a
+broken footer. CI runs it on Linux and macOS across Python 3.9–3.13, and re-runs the
+published one-liner weekly, so the install path can't rot unnoticed.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

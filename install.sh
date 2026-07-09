@@ -9,9 +9,9 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 mkdir -p "$CLAUDE_DIR"
 
 # Run from a clone, statusline.py sits next to us. Piped in from curl, it doesn't.
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-if [ -n "$HERE" ] && [ -f "$HERE/statusline.py" ]; then
-    SCRIPT="$HERE/statusline.py"
+HERE="$(dirname "${BASH_SOURCE[0]:-$0}")"
+if [ -f "$HERE/statusline.py" ]; then
+    SCRIPT="$(cd "$HERE" && pwd)/statusline.py"
 else
     SCRIPT="$CLAUDE_DIR/statusline.py"
     curl -fsSL "$RAW/statusline.py" -o "$SCRIPT"

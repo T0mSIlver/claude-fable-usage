@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # The install path depends on GitHub serving raw files; catch rot weekly.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # setup-python has no arm64 builds for these on macos-latest.
+          - {os: macos-latest, python: "3.9"}
+          - {os: macos-latest, python: "3.10"}
+        include:
+          - {os: macos-13, python: "3.9"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q
+
+  install:
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install into a throwaway config dir
+        run: |
+          set -euo pipefail
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude"
+          mkdir -p "$CLAUDE_CONFIG_DIR"
+          printf '{"theme":"dark"}' > "$CLAUDE_CONFIG_DIR/settings.json"
+          ./install.sh
+
+      - name: The statusLine is wired up and other keys survive
+        run: |
+          set -euo pipefail
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude"
+          python3 - <<'PY'
+          import json, os
+          path = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "settings.json")
+          settings = json.load(open(path))
+          assert settings["theme"] == "dark", "clobbered an unrelated setting"
+          line = settings["statusLine"]
+          assert line["type"] == "command", line
+          assert line["command"].endswith("statusline.py"), line
+          assert os.access(line["command"], os.X_OK), "not executable"
+          print("settings ok:", line["command"])
+          PY
+
+      - name: It renders
+        run: |
+          set -euo pipefail
+          out=$(printf '{"model":{"id":"claude-fable-5"}}' | ./statusline.py)
+          printf 'rendered: %s\n' "$out"
+          case "$out" in *5h*) ;; *) echo "::error::no 5h segment"; exit 1 ;; esac
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pipx run ruff check .
+      - run: shellcheck install.sh
+
+  published-install:
+    # Proves the README one-liner actually works against what main serves.
+    name: the published one-liner
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: curl | bash, into a throwaway config dir
+        run: |
+          set -euo pipefail
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude"
+          curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash
+          test -x "$CLAUDE_CONFIG_DIR/statusline.py"
+          out=$(printf '{}' | "$CLAUDE_CONFIG_DIR/statusline.py")
+          printf 'rendered: %s\n' "$out"
+          case "$out" in *5h*) ;; *) echo "::error::no 5h segment"; exit 1 ;; esac
+
+  links:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every URL in the README resolves
+        run: |
+          set -uo pipefail
+          fail=0
+          urls=$(grep -oE 'https?://[^ )"`]+' README.md | sed 's/[.,]$//' | sort -u)
+          for url in $urls; do
+            code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "$url" || echo 000)
+            printf '%s  %s\n' "$code" "$url"
+            case "$code" in 2*|3*) ;; *) fail=1 ;; esac
+          done
+          exit $fail

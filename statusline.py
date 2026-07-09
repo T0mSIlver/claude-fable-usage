@@ -28,7 +28,10 @@ CREDENTIALS = CLAUDE_DIR / ".credentials.json"
 CACHE = CLAUDE_DIR / "fable-usage-cache.json"
 LOCK = CLAUDE_DIR / "fable-usage-cache.lock"
 
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+# Overridable so the test suite can point this at a local server.
+USAGE_URL = os.environ.get(
+    "CLAUDE_FABLE_USAGE_URL", "https://api.anthropic.com/api/oauth/usage"
+)
 # The endpoint rate-limits aggressively, and a weekly window barely moves, so
 # there is nothing to gain from refreshing often.
 CACHE_TTL = 300  # seconds before the cached usage snapshot is refetched
