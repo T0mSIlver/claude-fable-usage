@@ -2,15 +2,26 @@
 
 [![CI](https://github.com/T0mSIlver/claude-fable-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/T0mSIlver/claude-fable-usage/actions/workflows/ci.yml)
 
-A Claude Code status line for your **5-hour**, **7-day**, and **Fable weekly** usage limits.
-The Fable segment stays quiet until the session is actually on Fable.
+A Claude Code status line for your **context window** and your **5-hour**, **7-day**, and
+**Fable weekly** usage limits. The Fable segment stays quiet until the session is actually
+on Fable.
 
 ```
-5h 17% · 7d 9% · Fable 15%                     ← on Opus/Sonnet
-5h 17% · 7d 9% · FABLE 15% ▰▱▱▱▱▱▱▱ · 6d 9h    ← on Fable
+ctx 24.5k/200k 12% · 5h 17% · 7d 9% · Fable 15%                  ← on Opus/Sonnet
+ctx 132k/200k 66% · 5h 17% · 7d 9% · FABLE 15% ▰▱▱▱▱▱▱▱ · 6d 9h  ← on Fable
 ```
 
 Green under 50%, yellow from 50%, red from 80%.
+
+The `ctx` segment covers every model, and sizes itself to whatever window the session has —
+`200k` normally, `1M` on a `[1m]` model. The token count is the input side of the context
+(your prompt plus both cache halves), which is the same figure Claude Code takes its own
+percentage against. It reads `ctx --` until the first reply lands, and again right after a
+`/compact`, because until then there is genuinely nothing to report. On a Claude Code too
+old to send the numbers, the segment is left out rather than showing a permanent `--`.
+
+Claude Code's own footer carries a bare `X% context used`; this puts the token count and the
+window size beside it, and colours them.
 
 ## Install
 

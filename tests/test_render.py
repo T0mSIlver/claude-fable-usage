@@ -57,6 +57,91 @@ def test_segment_renders_missing_as_dashes(sl):
     assert "17%" in sl.segment("5h", 17.4)
 
 
+def test_humanise_tokens(sl):
+    assert sl.humanise_tokens(0) == "0"
+    assert sl.humanise_tokens(947) == "947"
+    assert sl.humanise_tokens(24_500) == "24.5k"
+    assert sl.humanise_tokens(132_000) == "132k"
+    assert sl.humanise_tokens(200_000) == "200k"
+    assert sl.humanise_tokens(1_000_000) == "1M"
+    assert sl.humanise_tokens(1_200_000) == "1.2M"
+
+
+def test_context_segment_renders_tokens_and_percent(sl):
+    out = sl.context_segment({
+        "total_input_tokens": 24_500,
+        "context_window_size": 200_000,
+        "used_percentage": 12,
+        "current_usage": {"input_tokens": 24_500},
+    })
+    assert "ctx" in out
+    assert "24.5k" in out
+    assert "200k" in out
+    assert "12%" in out
+
+
+def test_context_segment_handles_a_1m_window(sl):
+    out = sl.context_segment({
+        "total_input_tokens": 250_000,
+        "context_window_size": 1_000_000,
+        "used_percentage": 25,
+        "current_usage": {"input_tokens": 250_000},
+    })
+    assert "250k" in out and "1M" in out and "25%" in out
+
+
+def test_context_segment_dashes_before_the_first_reply(sl):
+    """current_usage is null until a response lands, and again after /compact."""
+    assert "--" in sl.context_segment({
+        "total_input_tokens": 0,
+        "context_window_size": 200_000,
+        "used_percentage": None,
+        "current_usage": None,
+    })
+    assert "--" in sl.context_segment(None)
+    assert "--" in sl.context_segment("unexpectedly a string")
+    assert "--" in sl.context_segment({})
+
+
+def test_context_segment_treats_zero_percent_as_a_real_reading(sl):
+    """0% is a value, not a missing number."""
+    out = sl.context_segment({
+        "total_input_tokens": 300,
+        "context_window_size": 200_000,
+        "used_percentage": 0,
+        "current_usage": {"input_tokens": 300},
+    })
+    assert "--" not in out
+    assert "0%" in out and "300" in out
+
+
+def test_context_segment_computes_percent_when_absent(sl):
+    out = sl.context_segment({
+        "context_window_size": 200_000,
+        "current_usage": {
+            "input_tokens": 10_000,
+            "cache_creation_input_tokens": 5_000,
+            "cache_read_input_tokens": 35_000,
+        },
+    })
+    # 50k of 200k, summed from the three input-side counters.
+    assert "50.0k" in out and "25%" in out
+
+
+def test_context_segment_colours_by_fill(sl):
+    def render(percent):
+        return sl.context_segment({
+            "total_input_tokens": 2_000 * percent,
+            "context_window_size": 200_000,
+            "used_percentage": percent,
+            "current_usage": {"input_tokens": 1},
+        })
+
+    assert sl.GREEN in render(10)
+    assert sl.YELLOW in render(60)
+    assert sl.RED in render(90)
+
+
 def test_fable_segment_is_quiet_when_inactive(sl):
     out = sl.fable_segment({"percent": 15, "resets_at": None}, "Fable", active=False)
     assert "15%" in out
