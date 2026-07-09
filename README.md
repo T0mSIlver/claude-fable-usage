@@ -35,13 +35,47 @@ rather your status line owned that, set `hideVimModeIndicator: true` *inside* th
 
 ## Install
 
+Pick whichever of these you like. They all do the same two things: drop `statusline.py`
+somewhere, and point `statusLine` in `settings.json` at it. Nothing needs restarting —
+Claude Code picks up settings live, so the bar changes within a few seconds.
+
+### The one-liner
+
 ```sh
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/T0mSIlver/claude-fable-usage/main/install.sh | bash
 ```
 
-That points `statusLine` in `~/.claude/settings.json` at `statusline.py`. Restart Claude Code, or just wait — settings are picked up live.
+Installs `statusline.py` to `~/.claude/`, wires up `settings.json`, and backs the old one
+up to `settings.json.bak`. Your other settings are preserved.
 
-To do it by hand:
+If piping a script into `bash` makes you uneasy — it should — read it first:
+[`install.sh`](install.sh) is 30 lines.
+
+### Let Claude Code do it
+
+Paste this into any Claude Code session:
+
+```
+Install the status line from https://github.com/T0mSIlver/claude-fable-usage
+```
+
+There's no special mechanism here; Claude just reads the repo and edits your
+`settings.json`. Handy if you want it to explain what it's changing before it does.
+
+### From a clone
+
+```sh
+git clone https://github.com/T0mSIlver/claude-fable-usage
+cd claude-fable-usage && ./install.sh
+```
+
+The `statusLine` then points into the clone, so `git pull` is enough to update. The other
+two methods copy the script to `~/.claude/` instead, and you'd rerun the installer.
+
+### By hand
+
+Save `statusline.py` wherever you like, `chmod +x` it, and add this to
+`~/.claude/settings.json` (creating the file as `{}` if it doesn't exist):
 
 ```json
 {
@@ -52,6 +86,14 @@ To do it by hand:
   }
 }
 ```
+
+The path must be absolute — `~` is not expanded here.
+
+### Uninstall
+
+Delete the `statusLine` key from `~/.claude/settings.json`, or restore the backup the
+installer left at `~/.claude/settings.json.bak`. You can also remove the cache it keeps at
+`~/.claude/fable-usage-cache.json`.
 
 ## Why the Fable number needs a network call
 

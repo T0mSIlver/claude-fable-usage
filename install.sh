@@ -2,8 +2,20 @@
 # Point Claude Code's statusLine at statusline.py, preserving other settings.
 set -euo pipefail
 
-SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/statusline.py"
-SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+RAW="https://raw.githubusercontent.com/T0mSIlver/claude-fable-usage/main"
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SETTINGS="$CLAUDE_DIR/settings.json"
+
+mkdir -p "$CLAUDE_DIR"
+
+# Run from a clone, statusline.py sits next to us. Piped in from curl, it doesn't.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -n "$HERE" ] && [ -f "$HERE/statusline.py" ]; then
+    SCRIPT="$HERE/statusline.py"
+else
+    SCRIPT="$CLAUDE_DIR/statusline.py"
+    curl -fsSL "$RAW/statusline.py" -o "$SCRIPT"
+fi
 
 chmod +x "$SCRIPT"
 [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
