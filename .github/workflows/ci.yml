@@ -9,6 +9,11 @@ on:
     - cron: "0 6 * * 1"
   workflow_dispatch:
 
+# A new push supersedes whatever is still queued for the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: tests (${{ matrix.os }}, py${{ matrix.python }})
@@ -19,11 +24,15 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
         exclude:
-          # setup-python has no arm64 builds for these on macos-latest.
+          # setup-python ships no arm64 macOS build for the latest 3.9.x/3.10.x,
+          # which is what a bare "3.9"/"3.10" resolves to on macos-latest.
           - {os: macos-latest, python: "3.9"}
           - {os: macos-latest, python: "3.10"}
         include:
-          - {os: macos-13, python: "3.9"}
+          # Stock macOS ships Python 3.9, so it earns a macOS runner of its own.
+          # It has to be an Intel one: macos-13 was retired on 2025-12-04 and
+          # jobs asking for it now queue forever rather than fail.
+          - {os: macos-15-intel, python: "3.9"}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
