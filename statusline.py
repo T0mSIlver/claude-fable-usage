@@ -10,11 +10,14 @@ blocks on the network.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -29,6 +32,8 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 CACHE_TTL = 60  # seconds before the cached usage snapshot is refetched
 LOCK_TTL = 30  # a refresh older than this is assumed dead
 HTTP_TIMEOUT = 5
+BACKOFF = 300  # after a failed fetch, wait this long before trying again
+MIN_BACKOFF, MAX_BACKOFF = 60, 900  # bounds on a server-supplied Retry-After
 
 RESET, BOLD, DIM = "\x1b[0m", "\x1b[1m", "\x1b[2m"
 GREEN, YELLOW, RED = "\x1b[32m", "\x1b[33m", "\x1b[31m"
@@ -40,19 +45,93 @@ SEP = f"{DIM} · {RESET}"
 # --------------------------------------------------------------------------
 
 
-def read_token() -> str | None:
+def keychain_service() -> str:
+    """Mirrors how Claude Code names its Keychain item.
+
+    'Claude Code-credentials', plus a hash of the config dir when the user has
+    pointed CLAUDE_CONFIG_DIR somewhere non-default.
+    """
+    service = "Claude Code-credentials"
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        normalised = unicodedata.normalize("NFC", config_dir)
+        digest = hashlib.sha256(normalised.encode()).hexdigest()[:8]
+        service = f"{service}-{digest}"
+    return service
+
+
+def keychain_account() -> str:
+    account = os.environ.get("USER") or ""
+    if not account:
+        try:
+            account = os.getlogin()
+        except OSError:
+            account = ""
+    return account if re.fullmatch(r"[a-zA-Z0-9._-]+", account) else "claude-code-user"
+
+
+def read_credentials() -> dict | None:
+    """The plaintext store, which every current Claude Code writes on all platforms."""
     try:
-        creds = json.loads(CREDENTIALS.read_text())
+        return json.loads(CREDENTIALS.read_text())
     except (OSError, ValueError):
         return None
-    return creds.get("claudeAiOauth", {}).get("accessToken")
 
 
-def fetch_usage() -> dict | None:
-    """GET /api/oauth/usage and reduce it to the three windows we render."""
+def read_keychain() -> dict | None:
+    """Fallback for older macOS installs that still keep credentials in the Keychain."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "security", "find-generic-password",
+                "-a", keychain_account(),
+                "-s", keychain_service(),
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=HTTP_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def read_token() -> str | None:
+    """First source that actually yields a token wins."""
+    for source in (read_credentials, read_keychain):
+        creds = source() or {}
+        token = (creds.get("claudeAiOauth") or {}).get("accessToken")
+        if token:
+            return token
+    return None
+
+
+def retry_after_from(error) -> float:
+    """Honour a Retry-After header when the server sends one."""
+    try:
+        seconds = float(error.headers.get("Retry-After", ""))
+    except (AttributeError, TypeError, ValueError):
+        return BACKOFF
+    return min(MAX_BACKOFF, max(MIN_BACKOFF, seconds))
+
+
+def fetch_usage() -> tuple[dict | None, float]:
+    """GET /api/oauth/usage, reduced to the windows we render.
+
+    Returns (snapshot, backoff). The endpoint rate-limits, so a failure has to
+    park us for a while rather than let every render retry.
+    """
     token = read_token()
     if not token:
-        return None
+        return None, BACKOFF
 
     request = urllib.request.Request(
         USAGE_URL,
@@ -66,8 +145,10 @@ def fetch_usage() -> dict | None:
     try:
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
             payload = json.load(response)
+    except urllib.error.HTTPError as error:
+        return None, retry_after_from(error)
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
-        return None
+        return None, BACKOFF
 
     snapshot: dict = {"fetched_at": time.time()}
     for key in ("five_hour", "seven_day"):
@@ -91,20 +172,28 @@ def fetch_usage() -> dict | None:
                 "resets_at": limit.get("resets_at"),
             }
     snapshot["model_scoped"] = scoped
-    return snapshot
+    return snapshot, 0.0
 
 
-def refresh_cache() -> None:
-    """Fetch and atomically replace the cache. Runs in the detached child."""
-    snapshot = fetch_usage()
-    if snapshot is None:
-        return
+def write_cache(snapshot: dict) -> None:
     tmp = CACHE.with_suffix(".tmp")
     try:
         tmp.write_text(json.dumps(snapshot))
         tmp.replace(CACHE)
     except OSError:
         pass
+
+
+def refresh_cache() -> None:
+    """Fetch and atomically replace the cache. Runs in the detached child."""
+    snapshot, backoff = fetch_usage()
+    if snapshot is None:
+        # Keep whatever numbers we already had; just stop asking for a while.
+        stale = read_cache()
+        stale["retry_after"] = time.time() + backoff
+        write_cache(stale)
+        return
+    write_cache(snapshot)
 
 
 def read_cache() -> dict:
@@ -136,19 +225,21 @@ def acquire_lock() -> bool:
         return False
 
 
-def is_fresh(cache: dict) -> bool:
-    return time.time() - cache.get("fetched_at", 0) < CACHE_TTL
+def should_refresh(cache: dict) -> bool:
+    if time.time() - cache.get("fetched_at", 0) < CACHE_TTL:
+        return False
+    return time.time() >= cache.get("retry_after", 0)
 
 
 def spawn_refresh_if_stale(cache: dict) -> None:
     """Kick off a background refresh, at most one at a time."""
-    if is_fresh(cache):
+    if not should_refresh(cache):
         return
     if not acquire_lock():
         return
 
     # Another status line may have refreshed between our read and the lock.
-    if is_fresh(read_cache()):
+    if not should_refresh(read_cache()):
         LOCK.unlink(missing_ok=True)
         return
 
@@ -182,7 +273,9 @@ def humanise_reset(resets_at) -> str:
         if isinstance(resets_at, (int, float)):
             target = datetime.fromtimestamp(resets_at, tz=timezone.utc)
         else:
-            target = datetime.fromisoformat(str(resets_at))
+            # Python 3.9's fromisoformat, which is what stock macOS ships, cannot
+            # parse a trailing 'Z'.
+            target = datetime.fromisoformat(str(resets_at).replace("Z", "+00:00"))
             if target.tzinfo is None:
                 target = target.replace(tzinfo=timezone.utc)
     except (ValueError, OSError, OverflowError):
