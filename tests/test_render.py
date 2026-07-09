@@ -3,6 +3,8 @@
 import re
 import time
 
+import pytest
+
 
 def test_colour_thresholds(sl):
     assert sl.colour_for(0) == sl.GREEN
@@ -159,6 +161,59 @@ def test_fable_segment_is_loud_when_active(sl):
 def test_fable_segment_handles_absent_window(sl):
     assert "--" in sl.fable_segment(None, "Fable", active=True)
     assert "--" in sl.fable_segment({"percent": None}, "Fable", active=False)
+
+
+def test_number_admits_only_json_numbers(sl):
+    assert sl.number(0) == 0
+    assert sl.number(12.5) == 12.5
+    assert sl.number(-3) == -3
+    assert sl.number(None) is None
+    assert sl.number("half") is None
+    assert sl.number([1]) is None
+    assert sl.number({}) is None
+
+
+def test_number_rejects_bools(sl):
+    """bool subclasses int, and `true` where a percentage belongs is not 1%."""
+    assert sl.number(True) is None
+    assert sl.number(False) is None
+
+
+@pytest.mark.parametrize("window", [
+    {"total_input_tokens": "lots", "context_window_size": 200_000, "used_percentage": 12},
+    {"total_input_tokens": 1_000, "context_window_size": "big", "used_percentage": 12},
+    {"total_input_tokens": 1_000, "context_window_size": 200_000, "used_percentage": "half"},
+    {"context_window_size": 200_000, "current_usage": {"input_tokens": "x"}},
+    {"total_input_tokens": 1_000, "context_window_size": -200_000, "used_percentage": 12},
+    {"total_input_tokens": True, "context_window_size": 200_000, "used_percentage": True},
+])
+def test_context_segment_dashes_on_wrongly_typed_numbers(sl, window):
+    """A string where a number belongs used to crash the whole status line."""
+    assert "--" in sl.context_segment(window)
+
+
+def test_segment_dashes_on_a_wrongly_typed_percent(sl):
+    assert "--" in sl.segment("5h", "half")
+    assert "--" in sl.segment("5h", True)
+    assert "--" in sl.segment("5h", [1])
+
+
+def test_fable_segment_dashes_on_a_wrongly_typed_percent(sl):
+    assert "--" in sl.fable_segment({"percent": "lots"}, "Fable", active=True)
+    assert "--" in sl.fable_segment({"percent": True}, "Fable", active=False)
+    assert "--" in sl.fable_segment("a corrupt cache entry", "Fable", active=True)
+
+
+def test_window_percent_ignores_a_wrongly_typed_stdin_value(sl):
+    """Malformed stdin falls back to the cache rather than blanking the segment."""
+    cache = {"percent": 99, "resets_at": "b"}
+    assert sl.window_percent({"used_percentage": "half"}, cache) == (99, "b")
+    assert sl.window_percent({"used_percentage": True}, cache) == (99, "b")
+    assert sl.window_percent({"used_percentage": 22}, cache) == (22, None)
+
+
+def test_window_percent_ignores_a_wrongly_typed_cache_value(sl):
+    assert sl.window_percent(None, {"percent": "lots"}) == (None, None)
 
 
 def test_window_percent_prefers_stdin_over_cache(sl):

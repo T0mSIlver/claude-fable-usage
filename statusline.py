@@ -305,6 +305,22 @@ def humanise_reset(resets_at) -> str:
     return f"{minutes}m"
 
 
+def number(value):
+    """A JSON number, or None for anything else.
+
+    Every number here arrives from JSON — stdin, or a cache file some other
+    process wrote — so none of it is really typed. A string where a token count
+    belongs used to reach `count < 1_000` and take the whole status line down
+    with a TypeError.
+
+    bool is excluded deliberately, despite being an int subclass: `true` where a
+    percentage belongs is malformed input, not a confident 1%.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value
+
+
 def humanise_tokens(count: float) -> str:
     """'947', '24.5k', '132k', '1M' — narrow enough to sit in a status line."""
     if count < 1_000:
@@ -322,17 +338,25 @@ def context_used_tokens(window: dict):
     That is exactly the sum Claude Code takes its own percentage against, so the
     tokens we print and the percentage we print always agree. Output tokens are
     deliberately excluded.
+
+    A current_usage carrying no usable number at all — empty, or every counter
+    malformed — is unmeasured, not zero, and says so. Summing it to 0 would dress
+    an unknown up as a confident 0%, which is what this function's caller is at
+    pains to avoid.
     """
-    total = window.get("total_input_tokens")
+    total = number(window.get("total_input_tokens"))
     if total is not None:
         return total
     usage = window.get("current_usage")
     if not isinstance(usage, dict):
         return None
-    return sum(
-        usage.get(key) or 0
+    counters = [
+        number(usage.get(key))
         for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
-    )
+    ]
+    if all(count is None for count in counters):
+        return None
+    return sum(count or 0 for count in counters)
 
 
 def context_percent(window: dict, used, size):
@@ -342,7 +366,7 @@ def context_percent(window: dict, used, size):
     measured yet, and total_input_tokens sits at 0 — recomputing from that would
     dress an unknown up as a confident 0%.
     """
-    percent = window.get("used_percentage")
+    percent = number(window.get("used_percentage"))
     if percent is not None:
         return percent
     if not isinstance(window.get("current_usage"), dict) or used is None or not size:
@@ -356,6 +380,7 @@ def bar(percent: float, width: int = 8) -> str:
 
 
 def segment(label: str, percent) -> str:
+    percent = number(percent)
     if percent is None:
         return f"{DIM}{label} --{RESET}"
     return f"{DIM}{label}{RESET} {colour_for(percent)}{percent:.0f}%{RESET}"
@@ -371,10 +396,14 @@ def context_segment(window) -> str:
     if not isinstance(window, dict):
         return f"{DIM}ctx --{RESET}"
 
-    size = window.get("context_window_size")
+    # A window that is absent, zero, or negative gives nothing to divide by and
+    # nothing honest to draw.
+    size = number(window.get("context_window_size"))
+    if size is not None and size <= 0:
+        size = None
     used = context_used_tokens(window)
     percent = context_percent(window, used, size)
-    if percent is None or used is None or not size:
+    if percent is None or used is None or size is None:
         return f"{DIM}ctx --{RESET}"
 
     colour = colour_for(percent)
@@ -386,10 +415,10 @@ def context_segment(window) -> str:
 
 def fable_segment(window: dict | None, label: str, active: bool) -> str:
     """The Fable weekly window, loud when the session is actually on Fable."""
-    if window is None:
+    if not isinstance(window, dict):
         return f"{DIM}{label} --{RESET}"
 
-    percent = window.get("percent")
+    percent = number(window.get("percent"))
     if percent is None:
         return f"{DIM}{label} --{RESET}"
 
@@ -406,11 +435,15 @@ def fable_segment(window: dict | None, label: str, active: bool) -> str:
 
 
 def window_percent(stdin_window, cached_window) -> tuple:
-    """Prefer the value Claude Code handed us; fall back to the cache."""
-    if isinstance(stdin_window, dict) and stdin_window.get("used_percentage") is not None:
+    """Prefer the value Claude Code handed us; fall back to the cache.
+
+    A stdin value that isn't a number is treated as absent, so a malformed
+    payload falls back to the cache rather than blanking the segment.
+    """
+    if isinstance(stdin_window, dict) and number(stdin_window.get("used_percentage")) is not None:
         return stdin_window["used_percentage"], stdin_window.get("resets_at")
     if isinstance(cached_window, dict):
-        return cached_window.get("percent"), cached_window.get("resets_at")
+        return number(cached_window.get("percent")), cached_window.get("resets_at")
     return None, None
 
 
