@@ -54,6 +54,49 @@ def test_render_survives_any_stdin(tmp_path, stdin):
     assert "5h" in result.stdout
 
 
+def test_context_window_is_rendered(tmp_path):
+    result = render(json.dumps({
+        "context_window": {
+            "total_input_tokens": 24_500,
+            "total_output_tokens": 120,
+            "context_window_size": 200_000,
+            "used_percentage": 12,
+            "remaining_percentage": 88,
+            "current_usage": {
+                "input_tokens": 5_047,
+                "output_tokens": 178,
+                "cache_creation_input_tokens": 3_227,
+                "cache_read_input_tokens": 16_226,
+            },
+        },
+    }), tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "24.5k" in result.stdout
+    assert "200k" in result.stdout
+    assert "12%" in result.stdout
+
+
+def test_context_segment_is_absent_on_older_claude_code(tmp_path):
+    """No context_window key at all: the line looks exactly as it used to."""
+    result = render('{"rate_limits": {"five_hour": {"used_percentage": 12}}}', tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "ctx" not in result.stdout
+
+
+@pytest.mark.parametrize("context_window", [
+    None,
+    "unexpectedly a string",
+    {},
+    {"context_window_size": 0, "used_percentage": 5},
+    {"context_window_size": 200_000, "used_percentage": None, "current_usage": None},
+])
+def test_render_survives_any_context_window(tmp_path, context_window):
+    result = render(json.dumps({"context_window": context_window}), tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "ctx" in result.stdout
+    assert "5h" in result.stdout
+
+
 def test_render_works_with_no_token_and_no_cache(tmp_path):
     """No credentials anywhere: 5h/7d still render, Fable is simply absent."""
     result = render('{"rate_limits": {"five_hour": {"used_percentage": 12}}}', tmp_path)

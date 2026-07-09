@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Claude Code status line: 5-hour, 7-day, and Fable weekly usage limits.
+"""Claude Code status line: context window, plus 5-hour, 7-day and Fable limits.
 
-Claude Code hands the status line a JSON blob on stdin that carries the 5-hour
-and 7-day windows, but never the model-scoped weekly windows. Those only exist
-on GET /api/oauth/usage, so the Fable number is fetched from there and cached.
-The fetch happens in a detached child process; the status line itself never
-blocks on the network.
+Claude Code hands the status line a JSON blob on stdin that carries the context
+window and the 5-hour and 7-day windows, but never the model-scoped weekly
+windows. Those only exist on GET /api/oauth/usage, so the Fable number is
+fetched from there and cached. The fetch happens in a detached child process;
+the status line itself never blocks on the network.
 """
 
 from __future__ import annotations
@@ -305,6 +305,51 @@ def humanise_reset(resets_at) -> str:
     return f"{minutes}m"
 
 
+def humanise_tokens(count: float) -> str:
+    """'947', '24.5k', '132k', '1M' — narrow enough to sit in a status line."""
+    if count < 1_000:
+        return str(int(count))
+    if count < 1_000_000:
+        thousands = count / 1_000
+        return f"{thousands:.0f}k" if thousands >= 100 else f"{thousands:.1f}k"
+    millions = count / 1_000_000
+    return f"{millions:.0f}M" if millions == int(millions) else f"{millions:.1f}M"
+
+
+def context_used_tokens(window: dict):
+    """The input side of the context: prompt plus both cache halves.
+
+    That is exactly the sum Claude Code takes its own percentage against, so the
+    tokens we print and the percentage we print always agree. Output tokens are
+    deliberately excluded.
+    """
+    total = window.get("total_input_tokens")
+    if total is not None:
+        return total
+    usage = window.get("current_usage")
+    if not isinstance(usage, dict):
+        return None
+    return sum(
+        usage.get(key) or 0
+        for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+    )
+
+
+def context_percent(window: dict, used, size):
+    """Prefer the percentage Claude Code worked out; recompute only if it's absent.
+
+    A missing percentage alongside a missing current_usage means nothing has been
+    measured yet, and total_input_tokens sits at 0 — recomputing from that would
+    dress an unknown up as a confident 0%.
+    """
+    percent = window.get("used_percentage")
+    if percent is not None:
+        return percent
+    if not isinstance(window.get("current_usage"), dict) or used is None or not size:
+        return None
+    return min(100.0, max(0.0, used / size * 100))
+
+
 def bar(percent: float, width: int = 8) -> str:
     filled = min(width, max(0, round(percent / 100 * width)))
     return "▰" * filled + "▱" * (width - filled)
@@ -314,6 +359,29 @@ def segment(label: str, percent) -> str:
     if percent is None:
         return f"{DIM}{label} --{RESET}"
     return f"{DIM}{label}{RESET} {colour_for(percent)}{percent:.0f}%{RESET}"
+
+
+def context_segment(window) -> str:
+    """'ctx 24.5k/200k 12%', for whichever model the session is on.
+
+    Claude Code reports no usage before the first reply lands, and none again
+    straight after a /compact, so dashes are the honest answer there. Note that
+    0% is a real reading and must not be mistaken for a missing one.
+    """
+    if not isinstance(window, dict):
+        return f"{DIM}ctx --{RESET}"
+
+    size = window.get("context_window_size")
+    used = context_used_tokens(window)
+    percent = context_percent(window, used, size)
+    if percent is None or used is None or not size:
+        return f"{DIM}ctx --{RESET}"
+
+    colour = colour_for(percent)
+    return (
+        f"{DIM}ctx{RESET} {colour}{humanise_tokens(used)}{RESET}"
+        f"{DIM}/{humanise_tokens(size)}{RESET} {colour}{percent:.0f}%{RESET}"
+    )
 
 
 def fable_segment(window: dict | None, label: str, active: bool) -> str:
@@ -375,7 +443,13 @@ def main() -> None:
     identity = f"{model.get('id', '')} {model.get('display_name', '')}".lower()
     on_fable = "fable" in identity
 
-    parts = [segment("5h", five_hour), segment("7d", seven_day)]
+    parts = []
+    # Claude Code only started sending this window; older ones simply omit it,
+    # and a permanent 'ctx --' would be worse than no segment at all.
+    if "context_window" in payload:
+        parts.append(context_segment(payload["context_window"]))
+
+    parts += [segment("5h", five_hour), segment("7d", seven_day)]
     if fable_window is not None or on_fable:
         parts.append(fable_segment(fable_window, fable_label, on_fable))
 
