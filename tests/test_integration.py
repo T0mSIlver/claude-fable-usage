@@ -25,14 +25,21 @@ PAYLOAD = {
 FABLE_STDIN = json.dumps({"model": {"id": "claude-fable-5", "display_name": "Fable"}})
 
 
-def render(stdin, config_dir, url=None, timeout=30):
+def render(stdin, config_dir, url=None, timeout=30, cutoff=None):
     env = {"PATH": "/usr/bin:/bin", "HOME": str(config_dir), "CLAUDE_CONFIG_DIR": str(config_dir)}
     if url:
         env["CLAUDE_FABLE_USAGE_URL"] = url
+    if cutoff is not None:
+        env["CLAUDE_FABLE_CUTOFF"] = cutoff
     return subprocess.run(
         [sys.executable, str(SCRIPT)],
         input=stdin, capture_output=True, text=True, env=env, timeout=timeout,
     )
+
+
+def iso_in(seconds):
+    """An ISO stamp `seconds` from now, so a test never depends on today's date."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + seconds))
 
 
 # --- never crash -----------------------------------------------------------
@@ -126,6 +133,68 @@ def test_render_survives_a_corrupt_cached_fable_percent(tmp_path):
     result = render(FABLE_STDIN, tmp_path)
     assert result.returncode == 0, result.stderr
     assert "--" in result.stdout
+
+
+# --- the subscription countdown --------------------------------------------
+#
+# Every case pins the cutoff explicitly: a test that leaned on the built-in date
+# would start failing of its own accord once that date passes.
+
+
+def cached_fable(tmp_path):
+    (tmp_path / "fable-usage-cache.json").write_text(json.dumps({
+        "fetched_at": time.time(),
+        "model_scoped": {"Fable": {"percent": 15}},
+    }))
+
+
+def test_countdown_renders_on_a_fable_session(tmp_path):
+    result = render(FABLE_STDIN, tmp_path, cutoff=iso_in(86400 * 2 + 60))
+    assert result.returncode == 0, result.stderr
+    assert "sub ends" in result.stdout
+    assert "2d 0h" in result.stdout
+
+
+def test_countdown_accompanies_a_quiet_fable_segment(tmp_path):
+    """Not on Fable, but the plan has the window: the deadline still applies."""
+    cached_fable(tmp_path)
+    result = render(
+        json.dumps({"model": {"id": "claude-opus-4-8", "display_name": "Opus 4.8"}}),
+        tmp_path,
+        cutoff=iso_in(86400 * 2),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Fable 15%" in result.stdout
+    assert "sub ends" in result.stdout
+
+
+def test_countdown_is_absent_without_a_fable_segment(tmp_path):
+    """A plan that never had Fable included loses nothing on the date."""
+    result = render(
+        json.dumps({"model": {"id": "claude-opus-4-8", "display_name": "Opus 4.8"}}),
+        tmp_path,
+        cutoff=iso_in(86400 * 2),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "fable" not in result.stdout.lower()
+    assert "sub ends" not in result.stdout
+
+
+def test_countdown_disappears_once_the_deadline_passes(tmp_path):
+    """The Fable segment survives it; only the countdown goes."""
+    cached_fable(tmp_path)
+    result = render(FABLE_STDIN, tmp_path, cutoff="2020-01-01T00:00:00Z")
+    assert result.returncode == 0, result.stderr
+    assert "sub ends" not in result.stdout
+    assert "FABLE 15%" in result.stdout
+
+
+@pytest.mark.parametrize("cutoff", ["", "garbage", "2026-13-45T99:99:99Z", "1800000000"])
+def test_render_survives_any_cutoff(tmp_path, cutoff):
+    result = render(FABLE_STDIN, tmp_path, cutoff=cutoff)
+    assert result.returncode == 0, result.stderr
+    assert "sub ends" not in result.stdout
+    assert "5h" in result.stdout
 
 
 def test_render_works_with_no_token_and_no_cache(tmp_path):
