@@ -29,7 +29,9 @@ CACHE = CLAUDE_DIR / "fable-usage-cache.json"
 LOCK = CLAUDE_DIR / "fable-usage-cache.lock"
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-CACHE_TTL = 60  # seconds before the cached usage snapshot is refetched
+# The endpoint rate-limits aggressively, and a weekly window barely moves, so
+# there is nothing to gain from refreshing often.
+CACHE_TTL = 300  # seconds before the cached usage snapshot is refetched
 LOCK_TTL = 30  # a refresh older than this is assumed dead
 HTTP_TIMEOUT = 5
 BACKOFF = 300  # after a failed fetch, wait this long before trying again
@@ -115,10 +117,16 @@ def read_token() -> str | None:
 
 
 def retry_after_from(error) -> float:
-    """Honour a Retry-After header when the server sends one."""
+    """Honour a Retry-After header when the server sends a usable one.
+
+    /api/oauth/usage answers a 429 with `retry-after: 0`, which is no guidance at
+    all — treat anything non-positive as absent rather than as "retry now".
+    """
     try:
         seconds = float(error.headers.get("Retry-After", ""))
     except (AttributeError, TypeError, ValueError):
+        return BACKOFF
+    if seconds <= 0:
         return BACKOFF
     return min(MAX_BACKOFF, max(MIN_BACKOFF, seconds))
 
