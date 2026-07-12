@@ -7,11 +7,16 @@ A Claude Code status line for your **context window** and your **5-hour**, **7-d
 on Fable.
 
 ```
-ctx 24.5k/200k 12% · 5h 17% · 7d 9% · Fable 15% · sub ends 3d 7h                  ← on Opus/Sonnet
-ctx 132k/200k 66% · 5h 17% · 7d 9% · FABLE 15% ▰▱▱▱▱▱▱▱ · 6d 9h · sub ends 3d 7h  ← on Fable
+ctx 24.5k/200k 12% · 5h 17% · 7d 9% · Fable 15% · resets 6d 9h · sub ends 3d 7h        ← on Opus/Sonnet
+ctx 132k/200k 66% · 5h 17% · 7d 9% · FABLE 15% ▰▱▱▱▱▱▱▱ · resets 6d 9h · sub ends 3d 7h ← on Fable
 ```
 
 Green under 50%, yellow from 50%, red from 80%.
+
+`resets` is what remains of the current Fable week. It rides along with the percentage in
+both forms, because the percentage alone doesn't tell you much: 60% spent is comfortable
+with a day to go and alarming with six. It is dropped only when the API sends no reset
+timestamp to count to.
 
 The `ctx` segment covers every model, and sizes itself to whatever window the session has —
 `200k` normally, `1M` on a `[1m]` model. The token count is the input side of the context
@@ -26,10 +31,10 @@ segment is there for the whole session, and counts tokens rather than only perce
 
 ## The `sub ends` countdown
 
-Fable's *included* access on Pro, Max, Team and select Enterprise plans ends on **July 12,
-2026** — extended from the original July 7 cutoff after the announcement drew complaints.
-After it, Fable is billed as metered usage credits at API rates rather than counting against
-the subscription's weekly limits.
+Fable's *included* access on Pro, Max, Team and select Enterprise plans ends on **July 19,
+2026** — extended twice now, from July 7 to July 12 and then to the 19th. After it, Fable is
+billed as metered usage credits at API rates rather than counting against the subscription's
+weekly limits.
 
 So `sub ends` counts down to a **billing change, not a retirement**. `claude-fable-5` sits on
 no published [deprecation schedule](https://platform.claude.com/docs/en/about-claude/model-deprecations),
@@ -39,10 +44,11 @@ segment above stops meaning anything"*, because a credit balance is not a weekly
 this status line cannot show one.
 
 Anthropic published a date but never an hour or a timezone, so the countdown runs to the end
-of July 12 in UTC. Point it somewhere else — or drop the segment — with an ISO-8601 stamp:
+of July 19 in UTC. Point it somewhere else — the next extension, if there is one — or drop
+the segment, with an ISO-8601 stamp:
 
 ```sh
-export CLAUDE_FABLE_CUTOFF=2026-07-12T17:00:00-07:00   # a precise time, if one surfaces
+export CLAUDE_FABLE_CUTOFF=2026-07-19T17:00:00-07:00   # a precise time, if one surfaces
 export CLAUDE_FABLE_CUTOFF=                            # empty: no countdown
 ```
 

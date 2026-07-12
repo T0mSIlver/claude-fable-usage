@@ -215,6 +215,24 @@ def test_stdin_values_win_over_a_stale_cache(tmp_path):
     assert "99%" not in result.stdout
 
 
+def test_weekly_reset_rides_along_with_the_fable_percent(tmp_path):
+    """On Fable or not, the percent is a share of a week — show what's left of it."""
+    (tmp_path / "fable-usage-cache.json").write_text(json.dumps({
+        "fetched_at": time.time(),
+        "model_scoped": {
+            "Fable": {"percent": 15, "resets_at": iso_in(86400 * 3 + 7200 + 60)},
+        },
+    }))
+    cutoff = iso_in(86400 * 5 + 60)
+    quiet = render('{"model": {"id": "claude-opus-4-8"}}', tmp_path, cutoff=cutoff)
+    loud = render(FABLE_STDIN, tmp_path, cutoff=cutoff)
+
+    for result in (quiet, loud):
+        assert result.returncode == 0, result.stderr
+        assert "resets 3d 2h" in result.stdout
+        assert "sub ends" in result.stdout and "5d 0h" in result.stdout
+
+
 def test_fable_segment_is_bold_only_on_a_fable_session(tmp_path):
     (tmp_path / "fable-usage-cache.json").write_text(json.dumps({
         "fetched_at": time.time(),
