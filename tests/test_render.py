@@ -158,6 +158,21 @@ def test_fable_segment_is_loud_when_active(sl):
     assert "▰" in out
 
 
+@pytest.mark.parametrize("active", [True, False])
+def test_fable_segment_counts_down_to_the_weekly_reset(sl, active):
+    """A share of a week is uninterpretable without the rest of the week."""
+    # A minute of slack: the countdown truncates, so an exact 9h would render 8h.
+    window = {"percent": 15, "resets_at": time.time() + 86400 * 6 + 3600 * 9 + 60}
+    assert "resets 6d 9h" in sl.fable_segment(window, "Fable", active=active)
+
+
+@pytest.mark.parametrize("resets_at", [None, "not a date", {}])
+def test_fable_segment_drops_the_reset_it_cannot_work_out(sl, resets_at):
+    out = sl.fable_segment({"percent": 15, "resets_at": resets_at}, "Fable", active=True)
+    assert "15%" in out
+    assert "resets" not in out
+
+
 def test_fable_segment_handles_absent_window(sl):
     assert "--" in sl.fable_segment(None, "Fable", active=True)
     assert "--" in sl.fable_segment({"percent": None}, "Fable", active=False)

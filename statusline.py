@@ -40,18 +40,18 @@ HTTP_TIMEOUT = 5
 BACKOFF = 300  # after a failed fetch, wait this long before trying again
 MIN_BACKOFF, MAX_BACKOFF = 60, 900  # bounds on a server-supplied Retry-After
 
-# Fable's *included* access on paid plans ends on July 12, 2026 — extended from
-# the original July 7 cutoff after the announcement drew complaints. After it,
-# Fable is billed as metered usage credits rather than counting against the
-# subscription's weekly limits. Anthropic calls the change temporary and capacity
-# driven, so this is a countdown to a billing change, not to the model's
-# retirement: `claude-fable-5` is on no published deprecation schedule.
+# Fable's *included* access on paid plans ends on July 19, 2026 — extended twice
+# now, from July 7 to July 12 and then to the 19th. After it, Fable is billed as
+# metered usage credits rather than counting against the subscription's weekly
+# limits. Anthropic calls the change temporary and capacity driven, so this is a
+# countdown to a billing change, not to the model's retirement: `claude-fable-5`
+# is on no published deprecation schedule.
 #
 # Anthropic never published an hour or a timezone, only the date, so we count
 # down to the end of that day in UTC. Override with CLAUDE_FABLE_CUTOFF (an
 # ISO-8601 stamp) if a precise time surfaces, or set it empty to drop the
 # segment.
-FABLE_CUTOFF = os.environ.get("CLAUDE_FABLE_CUTOFF", "2026-07-13T00:00:00Z")
+FABLE_CUTOFF = os.environ.get("CLAUDE_FABLE_CUTOFF", "2026-07-20T00:00:00Z")
 CUTOFF_RED, CUTOFF_YELLOW = 86400, 3 * 86400  # seconds left before it gets loud
 
 RESET, BOLD, DIM = "\x1b[0m", "\x1b[1m", "\x1b[2m"
@@ -442,7 +442,13 @@ def context_segment(window) -> str:
 
 
 def fable_segment(window: dict | None, label: str, active: bool) -> str:
-    """The Fable weekly window, loud when the session is actually on Fable."""
+    """The Fable weekly window, loud when the session is actually on Fable.
+
+    The percentage is a share of a *week*, so it means little on its own: 60%
+    spent is comfortable with a day to go and alarming with six. The 'resets'
+    countdown therefore rides along with the percentage in both the loud and the
+    quiet form, and is only dropped when the window carries no usable timestamp.
+    """
     if not isinstance(window, dict):
         return f"{DIM}{label} --{RESET}"
 
@@ -450,12 +456,13 @@ def fable_segment(window: dict | None, label: str, active: bool) -> str:
     if percent is None:
         return f"{DIM}{label} --{RESET}"
 
+    reset_in = humanise_reset(window.get("resets_at"))
+    tail = f"{SEP}{DIM}resets {reset_in}{RESET}" if reset_in else ""
+
     if not active:
-        return f"{DIM}{label} {percent:.0f}%{RESET}"
+        return f"{DIM}{label} {percent:.0f}%{RESET}{tail}"
 
     colour = colour_for(percent)
-    reset_in = humanise_reset(window.get("resets_at"))
-    tail = f" {DIM}·{RESET} {DIM}{reset_in}{RESET}" if reset_in else ""
     return (
         f"{BOLD}{colour}{label.upper()} {percent:.0f}%{RESET} "
         f"{colour}{bar(percent)}{RESET}{tail}"
